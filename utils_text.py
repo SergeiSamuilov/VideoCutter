@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 
 import numpy as np
+import pandas as pd
 
 from params import (PUNCTUATION, NO_CUT, NO_CUT_WORDS, max_duration, max_symbols, MAX_DURATION_SECONDS, max_word_duration, min_word_duration)
 
@@ -254,6 +255,50 @@ def offset_timestamps(timecodes, start, end):
 
     return new
 
+def preprocess_diarization(diarization):
+    new_diarization = [diarization[0]]
+    min_length = 1
+
+    for num, segment in enumerate(diarization):
+        if num>0:
+            if segment['speaker'] == new_diarization[-1]['speaker']:
+                new_diarization[-1]['end'] = segment['end']
+            else:
+                new_diarization.append(segment)    
+    return [i for i in new_diarization if i['end'] - i['start'] > min_length]
+
+def clean_script_for_prompt(sentence_dict, diarization, tmp_folder):
+
+    length_list = []
+    index_list = []
+    sentence_list = []
+    speaker_list = ["undefined"]*len(sentence_dict['sentences'])
+    
+    diarization = preprocess_diarization(diarization)
+    eps = 0.5
+    
+    text = []
+    for count, line in enumerate(sentence_dict['sentences']):
+        index_list.append(count)
+        sentence_list.append(line.strip())
+        if count == len(sentence_dict['sentences'])-1:
+            length = round(sentence_dict['timestamps'][count][1] - sentence_dict['timestamps'][count][0], 2)
+        else:
+            length = round(sentence_dict['timestamps'][count+1][0] - sentence_dict['timestamps'][count][0], 2)
+        length_list.append(length)
+        
+        for segment in diarization:
+            if sentence_dict['timestamps'][count][0] > segment['start'] - eps:
+                speaker_list[count] = segment['speaker']
+        
+        line = f" ({count}) [{length}] {line.strip()}"
+        text.append(process_text_for_prompt(line))
+
+    d = {'index': index_list, 'speaker': speaker_list, 'sentence': sentence_list, 'length': length_list}
+    df = pd.DataFrame(data=d)
+    df.to_csv(f'{tmp_folder}/clean_text.csv', index=False)
+
+    return df
 
 def read_script_file(script_path):
 
